@@ -1,148 +1,136 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
-import struct
-import sys
+# Copyright (c) 2013-2014, Rethink Robotics
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 3. Neither the name of the Rethink Robotics nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+"""
+Baxter RSDK Joint Position Example: keyboard
+"""
+import argparse
+
 import rospy
-import tf
-import numpy
 
 import baxter_interface
+import baxter_external_devices
 
-from tf import transformations
-from baxter_interface import Limb
-
-from geometry_msgs.msg import (
-    PoseStamped,
-    Pose,
-    Point,
-    Quaternion,
-)
-from std_msgs.msg import Header
-
-from baxter_core_msgs.srv import (
-    SolvePositionIK,
-    SolvePositionIKRequest,
-)
-
-from std_msgs.msg import (
-    Float64,
-)
-
-from sensor_msgs.msg import (
-    JointState
-)
-
-from baxter_core_msgs.msg import(
-    JointCommand,
-)
-
-def send_to_joint_vals(q):
-    	# Send Baxter to the home configuration
-	# create joint commands for home pose
-	pub_joint_cmd=rospy.Publisher('/robot/limb/right/joint_command',JointCommand)   # setup the publisher
-	command_msg=JointCommand()
-	#command_msg.names=['right_s0', 'right_s1', 'right_e0', 'right_e1',  'right_w0', 'right_w1', 'right_w2']
-        command_msg.names=['right_e0', 'right_e1', 'right_s0', 'right_s1', 'right_w0', 'right_w1', 'right_w2']
-	command_msg.command=q
-	command_msg.mode=JointCommand.POSITION_MODE
-	control_rate = rospy.Rate(100) # sending commands at 100HZ
-
-	# acquire the current joint positions
-    	joint_positions=rospy.wait_for_message("/robot/joint_states",JointState)
-	qc = joint_positions.position[9:16]
-	qc = ([qc[2], qc[3], qc[0], qc[1], qc[4], qc[5], qc[6]]) # reorder due to the odd order that q is read in from the arm
-
-	while not rospy.is_shutdown() and numpy.linalg.norm(numpy.subtract(q,qc))>0.01: # move until the desired joint variable
-		pub_joint_cmd.publish(command_msg)	# sends the commanded joint values to Baxter
-		control_rate.sleep()                    # sending commands at 100HZ
-		joint_positions=rospy.wait_for_message("/robot/joint_states",JointState)
-    		qc = (joint_positions.position[9:16])
-		#qc = (qc[2], qc[3], qc[0], qc[1], qc[4], qc[5], qc[6])
-		#print "joint error = ", numpy.linalg.norm(numpy.subtract(q,qc))
-	print("In home pose")
-    	return (qc[2], qc[3], qc[0], qc[1], qc[4], qc[5], qc[6]) # reorder due to the odd order that q is read in from the arm
+from baxter_interface import CHECK_VERSION
 
 
-def get_joint_angles(limb,Px,Py,Pz,Qx,Qy,Qz,Qw):
-    #rospy.init_node("rsdk_ik_service_client")
-    ns = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
-    iksvc = rospy.ServiceProxy(ns, SolvePositionIK)
-    ikreq = SolvePositionIKRequest()
-    hdr = Header(stamp=rospy.Time.now(), frame_id='base')
-    poses = {
-    'left': PoseStamped(
-        header=hdr,
-        pose=Pose(
-            position=Point(
-                x = Px,    #original val:  0.657579481614,
-                y = Py,    #original val:  0.851981417433,
-                z = Pz,    #original val:  0.0388352386502,
-            ),
-            orientation=Quaternion(
-                x = Qx, #original val: -0.366894936773,
-                y = Qy, #original val:  0.885980397775,
-                z = Qz, #original val:  0.108155782462,
-                w = Qw, #original val:  0.262162481772,
-            ),
-        ),
-    ),
-    'right': PoseStamped(
-        header=hdr,
-        pose=Pose(
-            position=Point(
-                x=Px, #original val:  0.656982770038,
-                y=Py, #original val: -0.852598021641,
-                z=Pz, #original val:  0.0388609422173,
-            ),
-            orientation=Quaternion(
-                x=Qx, #original val:  0.367048116303,
-                y=Qy, #original val:  0.885911751787,
-                z=Qz, #original val: -0.108908281936,
-                w=Qw, #original val:  0.261868353356,
-            ),
-        ),
-    ),
-    }
-    ikreq.pose_stamp.append(poses[limb])
-    try:
-        rospy.wait_for_service(ns, 5.0)
-        resp = iksvc(ikreq)
-    except (rospy.ServiceException, rospy.ROSException), e:
-        rospy.logerr("Service call failed: %s" % (e,))
-        return 1
-    if (resp.isValid[0]):
-        print("SUCCESS - Valid Joint Solution Found:")
-        # Format solution into Limb API-compatible dictionary
-        limb_joints = dict(zip(resp.joints[0].name, resp.joints[0].position))
-        limb_joints_array = resp.joints[0].position
-        print limb_joints
-        return limb_joints_array
-    else:
-        print("INVALID POSE - No Valid Joint Solution Found.")
-    return 0
+def map_keyboard():
+    left = baxter_interface.Limb('left')
+    right = baxter_interface.Limb('right')
+    grip_left = baxter_interface.Gripper('left', CHECK_VERSION)
+    grip_right = baxter_interface.Gripper('right', CHECK_VERSION)
+    lj = left.joint_names()
+    rj = right.joint_names()
+
+    def set_j(limb, joint_name, delta):
+        current_position = limb.joint_angle(joint_name)
+        joint_command = {joint_name: current_position + delta}
+        limb.set_joint_positions(joint_command)
 
 
-def makeT(R,t):
-	return numpy.vstack((numpy.column_stack((R, numpy.transpose(numpy.array(t)))),[0,0,0,1]))
+    def perform_scan(limb, joint_name, delta):
+        limb = right
+        current_position = limb.joint_angle(rj[6])
+        joint_command = {joint_name: 3.14}
+        limb.set_joint_positions(joint_command)
+        while current_position > 0.1:
+            current_position = limb.joint_angle(rj[6])
+            joint_command = {joint_name: current_position - 0.025}
+            limb.set_joint_positions(joint_command)
 
-def main(): 
-	print("Initializing node... ")
-	rospy.init_node("examples")   # the node's name is examples
-        
-        first_pose = Limb('right')
-        print first_pose.endpoint_pose()
-        limb_joints = get_joint_angles('right',0.60979,-0.52214,0.17674,-0.068284,0.48343,-0.13865,0.86163)
+    bindings = {
+    #   key: (function, args, description)
+        's': (perform_scan, [right, rj[6],0.1], "Scanning..."),
+        'v': (set_j, [right, rj[6], 0.1], "right_w2 increase"),
+        'z': (set_j, [right, rj[6], -0.1], "right_w2 decrease"),
+     }
+    done = False
+    print("Controlling joints. Press ? for help, Esc to quit.")
+    while not done and not rospy.is_shutdown():
+        c = baxter_external_devices.getch()
+        if c:
+            #catch Esc or ctrl-c
+            if c in ['\x1b', '\x03']:
+                done = True
+                rospy.signal_shutdown("Example finished.")
+            elif c in bindings:
+                cmd = bindings[c]
+                #expand binding to something like "set_j(right, 's0', 0.1)"
+                cmd[0](*cmd[1])
+                print("command: %s" % (cmd[2],))
+            else:
+                print("key bindings: ")
+                print("  Esc: Quit")
+                print("  ?: Help")
+                for key, val in sorted(bindings.items(),
+                                       key=lambda x: x[1][2]):
+                    print("  %s: %s" % (key, val[2]))
 
-        #joint_vars = [limb_joints[5],limb_joints[6],limb_joints[0],limb_joints[1],limb_joints[2],limb_joints[3],limb_joints[4]]
-        #send_to_joint_vals(joint_vars)
-        
-	send_to_joint_vals([0.607839886505127, 0.14994662184448243, 0.1461116698791504, -0.11696603494262696, -0.6036214393432617, -1.5700293346069336, 3.0]) # 
-        send_to_joint_vals([0.607839886505127, 0.14994662184448243, 0.1461116698791504, -0.11696603494262696, -0.6036214393432617, -1.5700293346069336, 0.0]) 
-	pub_joint_cmd=rospy.Publisher('/robot/limb/right/joint_command',JointCommand)	
+
+def main():
+    """RSDK Joint Position Example: Keyboard Control
+
+    Use your dev machine's keyboard to control joint positions.
+
+    Each key corresponds to increasing or decreasing the angle
+    of a joint on one of Baxter's arms. Each arm is represented
+    by one side of the keyboard and inner/outer key pairings
+    on each row for each joint.
+    """
+    epilog = """
+See help inside the example with the '?' key for key bindings.
+    """
+    arg_fmt = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(formatter_class=arg_fmt,
+                                     description=main.__doc__,
+                                     epilog=epilog)
+    parser.parse_args(rospy.myargv()[1:])
+
+    print("Initializing node... ")
+    rospy.init_node("rsdk_joint_position_keyboard")
+    print("Getting robot state... ")
+    rs = baxter_interface.RobotEnable(CHECK_VERSION)
+    init_state = rs.state().enabled
+
+    def clean_shutdown():
+        print("\nExiting example...")
+        if not init_state:
+            print("Disabling robot...")
+            rs.disable()
+    rospy.on_shutdown(clean_shutdown)
+
+    print("Enabling robot... ")
+    rs.enable()
+
+    map_keyboard()
+    print("Done.")
 
 
 if __name__ == '__main__':
     main()
-
-
-
